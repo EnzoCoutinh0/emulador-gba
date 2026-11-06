@@ -63,6 +63,55 @@ CORE e UI pelo código JavaScript do emulador e da interface.
   #toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(20px); background: #262a3b; border: 1px solid #3a3f57; color: var(--text); padding: 10px 16px; border-radius: 10px; opacity: 0; pointer-events: none; transition: .2s; max-width: 90vw; z-index: 200; box-shadow: 0 8px 30px rgba(0,0,0,.4); }
   #toast.show { opacity: 1; transform: translateX(-50%); }
 
+  /* ---------- telas: login, biblioteca e jogo (classes v-login / v-lib / v-game no body) ---------- */
+  body.v-login main, body.v-lib main, body.v-login #library, body.v-game #library, body.v-lib #login, body.v-game #login { display: none !important; }
+  body.v-login header .hide-login { display: none; }
+  #login { flex: 1; display: flex; align-items: center; justify-content: center; padding: 24px 16px; background: radial-gradient(ellipse at 50% 20%, #1c1730 0%, var(--bg) 60%); }
+  .lbox { width: min(400px, 100%); background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 22px; box-shadow: 0 20px 60px rgba(0,0,0,.35); }
+  .lbox h2 { margin: 0 0 4px; font-size: 22px; } .lbox h2 span { color: var(--accent2); }
+  .lbox p.sub { margin: 0 0 16px; color: var(--muted); font-size: 13px; }
+  .ltabs { display: flex; gap: 6px; margin-bottom: 14px; background: var(--panel2); padding: 4px; border-radius: 10px; }
+  .ltab { flex: 1; border: 0; background: none; padding: 8px; border-radius: 8px; color: var(--muted); }
+  .ltab.on { background: var(--accent); color: #fff; font-weight: 600; }
+  .lbox form { display: flex; flex-direction: column; gap: 10px; }
+  .lbox input[type=text], .lbox input[type=password], #dlgFields input { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 11px 12px; width: 100%; }
+  .lbox input:focus, #dlgFields input:focus { outline: 2px solid var(--accent); border-color: transparent; }
+  .lbox label.chk { display: flex; gap: 8px; align-items: center; color: var(--muted); font-size: 13px; }
+  .lbox button[type=submit] { padding: 11px; font-weight: 600; }
+  #loginErr { color: #ff7b8a; font-size: 13px; min-height: 18px; }
+  .acctlist { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+  .acct { display: flex; align-items: center; gap: 8px; padding: 6px 12px 6px 6px; border-radius: 99px; }
+  .acct i { width: 26px; height: 26px; border-radius: 50%; background: var(--accent); color: #fff; font-style: normal; font-weight: 700; display: flex; align-items: center; justify-content: center; font-size: 13px; }
+  .guest { width: 100%; margin-top: 12px; background: none; border-style: dashed; color: var(--muted); }
+  .lnote { color: var(--muted); font-size: 12px; margin: 12px 0 0; }
+  #storageNote { color: var(--warn); font-size: 12px; }
+  #library { flex: 1; padding: 20px 16px; max-width: 1180px; width: 100%; margin: 0 auto; }
+  .libhead { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+  .libhead h2 { margin: 0; font-size: 20px; } .libhead .sp { flex: 1; }
+  #libGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 16px; }
+  .card { position: relative; display: flex; flex-direction: column; gap: 4px; }
+  .cover { position: relative; aspect-ratio: 3 / 2; border-radius: 12px; overflow: hidden; background: linear-gradient(135deg, #241f3d, #12131a); border: 1px solid var(--line); cursor: pointer; display: flex; align-items: center; justify-content: center; }
+  .cover img { width: 100%; height: 100%; object-fit: cover; image-rendering: pixelated; }
+  .cover > span { font-size: 34px; font-weight: 800; color: var(--accent2); opacity: .7; }
+  .cover .play { position: absolute; inset: auto 8px 8px auto; background: rgba(0,0,0,.7); padding: 5px 10px; border-radius: 8px; font-size: 12.5px; font-weight: 600; opacity: 0; transition: .15s; }
+  .cover:hover .play, .cover:focus .play { opacity: 1; } .cover:hover { border-color: var(--accent); }
+  .card b { font-size: 14px; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 34px; }
+  .card .more { position: absolute; right: 0; bottom: 18px; padding: 2px 9px; }
+  #libEmpty { text-align: center; padding: 50px 20px; color: var(--muted); border: 1px dashed var(--line); border-radius: 14px; }
+  #libEmpty b { color: var(--text); display: block; font-size: 16px; margin-bottom: 6px; }
+  .acctwrap { position: relative; }
+  #acctMenu { position: absolute; right: 0; top: calc(100% + 6px); background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 6px; display: none; flex-direction: column; min-width: 190px; z-index: 80; box-shadow: 0 12px 40px rgba(0,0,0,.4); }
+  #acctMenu.open { display: flex; } #acctMenu button { border: 0; background: none; text-align: left; padding: 9px 10px; }
+  #acctMenu button:hover { background: var(--panel2); } #acctMenu .danger { color: #ff7b8a; }
+  button.danger { background: #b42839; border-color: #b42839; color: #fff; font-weight: 600; }
+  .slot { display: grid; grid-template-columns: 120px 1fr auto; gap: 12px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .slot .thumb { width: 120px; aspect-ratio: 3 / 2; border-radius: 8px; background: var(--panel2); object-fit: cover; image-rendering: pixelated; }
+  .slot .info { display: flex; flex-direction: column; gap: 2px; } .slot .btns { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+  .small-modal { width: min(440px, 100%); padding: 16px; }
+  #dlgFields { display: flex; flex-direction: column; gap: 8px; margin: 10px 0; }
+  #gmenu .box { display: flex; flex-direction: column; gap: 8px; }
+  @media (max-width: 560px) { .slot { grid-template-columns: 84px 1fr; } .slot .thumb { width: 84px; } .slot .btns { grid-column: 1 / 3; } }
+
   /* ---------- modal de configurações: janela por cima da página, com abas ---------- */
   .modal-bg { position: fixed; inset: 0; background: rgba(5,6,10,.7); z-index: 100; display: none; align-items: center; justify-content: center; padding: 16px; }
   .modal-bg.open { display: flex; }
@@ -151,13 +200,60 @@ CORE e UI pelo código JavaScript do emulador e da interface.
   }
 </style>
 </head>
-<body>
+<body class="v-login">
 <!-- Cabeçalho: título, onde os saves estão guardados e atalho para as configurações -->
 <header>
   <h1>Emulador <span>GBA</span></h1>
   <div id="cloud" class="badge">Verificando armazenamento…</div>
+  <div class="acctwrap hide-login">
+    <button id="acctBtn">👤 ▾</button>
+    <div id="acctMenu">
+      <button id="amLib">📚 Biblioteca</button>
+      <button id="amSwitch">🔁 Trocar de conta</button>
+      <button id="amPass">🔑 Mudar senha</button>
+      <button id="amOut">🚪 Sair</button>
+      <button id="amDelete" class="danger">Excluir conta</button>
+    </div>
+  </div>
   <button id="btnSettings2" title="Configurações">⚙</button>
 </header>
+
+<!-- Tela de login: contas guardadas neste navegador -->
+<section id="login">
+  <div class="lbox">
+    <h2>Emulador <span>GBA</span></h2>
+    <p class="sub">Entre para ver seus jogos e continuar de onde parou.</p>
+    <div id="acctListWrap"><div class="muted" style="margin-bottom:8px">Contas neste navegador</div><div class="acctlist" id="acctList"></div></div>
+    <div class="ltabs"><button class="ltab on" data-lt="in">Entrar</button><button class="ltab" data-lt="new">Criar conta</button></div>
+    <form id="formIn" autocomplete="on">
+      <input id="liUser" type="text" placeholder="Usuário" autocomplete="username" required>
+      <input id="liPass" type="password" placeholder="Senha" autocomplete="current-password" required>
+      <label class="chk"><input id="liRemember" type="checkbox" checked> Continuar conectado</label>
+      <button type="submit" class="primary">Entrar</button>
+    </form>
+    <form id="formNew" style="display:none" autocomplete="off">
+      <input id="nuUser" type="text" placeholder="Nome de usuário (3 a 20 letras ou números)" autocomplete="username" required>
+      <input id="nuPass" type="password" placeholder="Senha (mínimo 4 caracteres)" autocomplete="new-password" required>
+      <input id="nuPass2" type="password" placeholder="Repita a senha" autocomplete="new-password" required>
+      <button type="submit" class="primary">Criar conta e entrar</button>
+    </form>
+    <div id="loginErr"></div>
+    <button id="btnGuest" class="guest">Jogar sem conta (convidado)</button>
+    <p class="lnote">As contas ficam guardadas neste navegador. Cada conta tem os próprios jogos, saves, estados e controles. A senha é protegida com criptografia e nunca sai do seu aparelho.</p>
+    <div id="storageNote"></div>
+  </div>
+</section>
+
+<!-- Biblioteca: os jogos da conta, com o ponto em que cada um parou -->
+<section id="library">
+  <div class="libhead">
+    <h2 id="libHello">Seus jogos</h2><span class="sp"></span>
+    <button id="libAdd" class="primary">+ Adicionar jogo</button>
+  </div>
+  <div id="libEmpty"><b>Sua biblioteca está vazia</b>Clique em “Adicionar jogo” ou arraste um arquivo .gba ou .zip para cá.</div>
+  <div id="libGrid"></div>
+  <p class="muted" style="margin-top:18px">Cada jogo guarda sozinho o ponto exato em que você parou. Troque de jogo à vontade: ao voltar, ele continua dali.</p>
+</section>
 <main>
   <div class="left">
     <!-- "player" = tela do jogo + controles de toque. É ele que vai para a tela cheia. -->
@@ -193,11 +289,12 @@ CORE e UI pelo código JavaScript do emulador e da interface.
     </div>
     <!-- Barra principal de botões -->
     <div class="bar">
+      <button id="btnLibrary">📚 Biblioteca</button>
       <button id="btnOpen" class="primary">Abrir ROM</button>
       <button id="btnPause" disabled>Pausar</button>
       <button id="btnReset" disabled>Reiniciar</button>
-      <button id="btnSaveState" disabled>Salvar estado</button>
-      <button id="btnLoadState" disabled>Carregar estado</button>
+      <button id="btnSaveState" disabled>💾 Estados salvos</button>
+      <button id="btnLoadState" disabled style="display:none">Carregar estado</button>
       <span class="split"><button id="btnFF" title="Acelerar">⏩ Acelerar</button><select id="ffSpeed" title="Velocidade do acelerar"></select></span>
       <button id="btnMute">🔊</button>
       <input id="vol" type="range" min="0" max="100" value="80" title="Volume">
@@ -288,12 +385,39 @@ CORE e UI pelo código JavaScript do emulador e da interface.
   </div>
 </div>
 
+<!-- Estados salvos: automático + 4 espaços -->
+<div class="modal-bg" id="states">
+  <div class="modal small-modal" style="width:min(560px,100%)">
+    <div class="modal-head" style="padding:0 0 8px"><b>Estados salvos</b><button id="btnCloseStates">Fechar</button></div>
+    <p class="muted" style="margin:0 0 6px">Um estado guarda o momento exato do jogo. O automático é gravado sozinho quando você sai, troca de jogo ou a cada 2 minutos. <kbd>F2</kbd>/<kbd>F4</kbd> salvam e carregam o espaço 1.</p>
+    <div id="slotList" style="overflow:auto"></div>
+  </div>
+</div>
+<!-- Caixa de diálogo genérica (confirmações e senhas) -->
+<div class="modal-bg" id="dialog" style="z-index:120">
+  <div class="modal small-modal">
+    <b id="dlgTitle" style="font-size:16px"></b>
+    <p id="dlgText" class="muted" style="margin:8px 0"></p>
+    <div id="dlgFields"></div>
+    <div class="row" style="justify-content:flex-end"><button id="dlgCancel">Cancelar</button><button id="dlgOk" class="primary">OK</button></div>
+  </div>
+</div>
+<!-- Opções de um jogo na biblioteca -->
+<div class="modal-bg" id="gmenu">
+  <div class="modal small-modal box">
+    <b id="gmTitle" style="font-size:16px;margin-bottom:6px"></b>
+    <button data-gm="restart">Começar do início (mantém o save do jogo)</button>
+    <button data-gm="remove" class="danger">Remover da biblioteca</button>
+    <button data-gm="">Cancelar</button>
+  </div>
+</div>
+
 <!-- Menu rápido (botão ☰ no celular ou tecla Esc) -->
 <div id="quick"><div class="box">
   <button data-q="pause">Pausar / Continuar</button>
   <button data-q="ff">⏩ Acelerar</button>
-  <button data-q="save">Salvar estado</button>
-  <button data-q="load">Carregar estado</button>
+  <button data-q="save">💾 Estados salvos</button>
+  <button data-q="lib">📚 Biblioteca</button>
   <button data-q="full">Tela cheia</button>
   <button data-q="up" id="qUp">Upscaling: desligado</button>
   <button data-q="shot">📷 Captura 4K</button>

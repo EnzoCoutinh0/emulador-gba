@@ -119,8 +119,10 @@
   // são divididos em pedaços de 200 KB (cada documento do banco aceita até 256 KB).
   const Store = {
     db: null, uid: null, dl: null, ready: null,
+    user: Accounts.GUEST,          // conta local ativa
     init() {
       this.ready = (async () => {
+        await LocalDB.open();
         if (!IN_CLAUDE) return;
         try {
           const [db, user, dl] = await Promise.all([window.claude.use('db'), window.claude.use('user'), window.claude.use('downloads')]);
@@ -130,46 +132,64 @@
         updateCloudBadge();
       })();
     },
+    // chave local (IndexedDB) e nome na nuvem, ambos separados por conta
+    k(name) { return this.user.id + '/' + name; },
+    cloud(name) { return 'u-' + this.user.id + '-' + name; },
     col() { return this.db.collection('data/users/' + this.uid); },
-    async putBlob(name, u8) {
-      const b64 = b64enc(await gz(u8));
+    async putBlob(name, u8, extra) {
       const t = Date.now();
-      lsSet('gba.' + name, JSON.stringify({ t, b64 }));
+      try { await LocalDB.put('blobs', this.k(name), Object.assign({ t, data: u8 }, extra || {})); } catch (e) { console.warn(e); }
       if (!this.db) return 'local';
-      const CH = 200000, n = Math.ceil(b64.length / CH);
+      const b64 = b64enc(await gz(u8));
+      const CH = 200000, n = Math.ceil(b64.length / CH), cn = this.cloud(name);
       try {
-        for (let i = 0; i < n; i++) await withTimeout(this.col().doc(name + '.' + i).set({ d: b64.slice(i * CH, (i + 1) * CH) }), 15000);
-        await withTimeout(this.col().doc(name).set({ t, n, size: u8.length }), 15000);
+        for (let i = 0; i < n; i++) await withTimeout(this.col().doc(cn + '.' + i).set({ d: b64.slice(i * CH, (i + 1) * CH) }), 15000);
+        await withTimeout(this.col().doc(cn).set(Object.assign({ t, n, size: u8.length }, extra || {})), 15000);
         return 'cloud';
       } catch (e) { console.warn('db', e); return 'local'; }
     },
-    async getBlob(name) {
+    async getBlob(name, metaOnly) {
       let best = null;
-      const ls = lsGet('gba.' + name);
-      if (ls) { try { const o = JSON.parse(ls); best = { t: o.t, b64: o.b64 }; } catch (e) { } }
+      try { const r = await LocalDB.get('blobs', this.k(name)); if (r) best = r; } catch (e) { }
       if (this.db) {
         try {
-          const meta = await withTimeout(this.col().doc(name).get(), 10000);
+          const cn = this.cloud(name);
+          const meta = await withTimeout(this.col().doc(cn).get(), 10000);
           if (meta.exists) {
             const m = meta.data();
             if (!best || m.t > best.t) {
-              let b64 = '';
-              for (let i = 0; i < m.n; i++) { const c = await withTimeout(this.col().doc(name + '.' + i).get(), 10000); if (!c.exists) throw new Error('pedaço faltando'); b64 += c.data().d; }
-              best = { t: m.t, b64 };
+              if (metaOnly) best = { t: m.t, thumb: m.thumb };
+              else {
+                let b64 = '';
+                for (let i = 0; i < m.n; i++) { const c = await withTimeout(this.col().doc(cn + '.' + i).get(), 10000); if (!c.exists) throw new Error('pedaço faltando'); b64 += c.data().d; }
+                best = { t: m.t, data: await gunzip(b64dec(b64)), thumb: m.thumb };
+                LocalDB.put('blobs', this.k(name), best).catch(() => { });
+              }
             }
           }
         } catch (e) { console.warn('db', e); }
       }
-      if (!best) return null;
-      return { t: best.t, data: await gunzip(b64dec(best.b64)) };
+      // saves de antes das contas (localStorage): ficam para a primeira conta que entrar
+      if (!best && this.user.legacy) {
+        for (const key of ['gba.raw.' + name, 'gba.' + name]) {
+          const ls = lsGet(key); if (!ls) continue;
+          try {
+            const o = JSON.parse(ls); let data = b64dec(o.b64);
+            if (key === 'gba.' + name) data = await gunzip(data);
+            best = { t: o.t, data }; await LocalDB.put('blobs', this.k(name), best); break;
+          } catch (e) { }
+        }
+      }
+      return best;
     },
+    async delBlob(name) { try { await LocalDB.del('blobs', this.k(name)); } catch (e) { } },
     async putJSON(name, obj) {
-      lsSet('gba.' + name, JSON.stringify(obj));
-      if (this.db) { try { await withTimeout(this.col().doc(name).set(obj), 10000); } catch (e) { console.warn(e); } }
+      try { await LocalDB.put('meta', this.k(name), obj); } catch (e) { }
+      if (this.db) { try { await withTimeout(this.col().doc(this.cloud(name)).set(obj), 10000); } catch (e) { console.warn(e); } }
     },
     async getJSON(name) {
-      if (this.db) { try { const d = await withTimeout(this.col().doc(name).get(), 8000); if (d.exists) return d.data(); } catch (e) { } }
-      return null;
+      if (this.db) { try { const d = await withTimeout(this.col().doc(this.cloud(name)).get(), 8000); if (d.exists) return d.data(); } catch (e) { } }
+      try { return (await LocalDB.get('meta', this.k(name))) || null; } catch (e) { return null; }
     },
   };
   function updateCloudBadge() {
@@ -200,12 +220,18 @@
   const DEFAULTS = { filter: 'sharp', lastUpscale: 'xbr', fit: 'fit', cc: 0, ffSpeed: 4, ffAudio: 1, turboRate: 4, showFps: 1, volume: 80, muted: 0, touchMode: 'auto', touchSize: 100, touchOpacity: 75, haptics: 1, deadzone: 40, kb: DEF_KB, gp: DEF_GP, t: 0 };
   const clone = (o) => JSON.parse(JSON.stringify(o));
   let S = clone(DEFAULTS);
-  try { const o = JSON.parse(lsGet('gba.settings') || 'null'); if (o) S = Object.assign(clone(DEFAULTS), o); } catch (e) { }
-  for (const [id] of ACTIONS) { if (!S.kb[id]) S.kb[id] = (DEF_KB[id] || []).slice(); if (!S.gp[id]) S.gp[id] = (DEF_GP[id] || []).slice(); }
+  // cada conta tem as próprias configurações (controles, filtro, volume...)
+  function loadUserSettings() {
+    S = clone(DEFAULTS);
+    const raw = lsGet('gba.settings.' + Store.user.id) || (Store.user.legacy ? lsGet('gba.settings') : null);
+    try { const o = JSON.parse(raw || 'null'); if (o) S = Object.assign(clone(DEFAULTS), o); } catch (e) { }
+    for (const [id] of ACTIONS) { if (!S.kb[id]) S.kb[id] = (DEF_KB[id] || []).slice(); if (!S.gp[id]) S.gp[id] = (DEF_GP[id] || []).slice(); }
+  }
+  loadUserSettings();
   let settingsTimer = null;
   function saveSettings() {
     S.t = Date.now();
-    lsSet('gba.settings', JSON.stringify(S));
+    lsSet('gba.settings.' + Store.user.id, JSON.stringify(S));
     clearTimeout(settingsTimer);
     settingsTimer = setTimeout(() => Store.putJSON('settings', { json: JSON.stringify(S), t: S.t }), 1500);
   }
@@ -213,7 +239,7 @@
     await Store.ready;
     const o = await Store.getJSON('settings');
     if (o && o.json && o.t > (S.t || 0)) {
-      try { S = Object.assign(clone(DEFAULTS), JSON.parse(o.json)); lsSet('gba.settings', o.json); applySettings(); } catch (e) { }
+      try { S = Object.assign(clone(DEFAULTS), JSON.parse(o.json)); lsSet('gba.settings.' + Store.user.id, o.json); applySettings(); } catch (e) { }
     }
   }
 
@@ -295,6 +321,8 @@
       return;
     }
     if (settingsOpen()) { if (e.code === 'Escape') { e.preventDefault(); closeSettings(); } return; }
+    if (view !== 'game') return;
+    if (statesOpen() && e.code === 'Escape') { e.preventDefault(); closeStates(); return; }
     if ($('#quick').classList.contains('open') && e.code === 'Escape') { e.preventDefault(); closeQuick(); return; }
     if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') && !running) return;
     const bound = ACTIONS.some(([id]) => S.kb[id].includes(e.code));
@@ -330,8 +358,8 @@
     const edge = (id) => actState[id] && !prevAct[id];
     if (edge('ffToggle')) toggleFF();
     if (edge('pause')) togglePause();
-    if (edge('saveState')) saveState();
-    if (edge('loadState')) loadState();
+    if (edge('saveState')) saveState('1');
+    if (edge('loadState')) loadState('1');
     if (edge('fullscreen')) toggleFullscreen();
     if (edge('screenshot')) screenshot();
     if (edge('upscale')) toggleUpscale();
@@ -377,8 +405,14 @@
   // ---------- laço principal (só exibe; a emulação roda no motor) ----------
   let statusExtra = '', statusExtraT = 0, lastFF = false;
   function setStatusExtra(s) { statusExtra = s; statusExtraT = performance.now(); }
-  function loop() {
+  let lastLoopT = 0;
+  function loop(t) {
     requestAnimationFrame(loop);
+    if (running && !paused && view === 'game') {
+      playAcc += Math.min(100, t - (lastLoopT || t));
+      if (t - lastAutoT > 120000 && !stateBusy) { lastAutoT = t; saveState('auto'); }
+    }
+    lastLoopT = t;
     pollInput(false);
     const ff = ffActive();
     if (ff !== lastFF) { lastFF = ff; updateFFUI(); }
@@ -419,7 +453,7 @@
   }
   function flushSaveLocalSync() {
     if (!gameKey || !lastSave || !lastSaveUnstored) return;
-    lsSet('gba.raw.save-' + gameKey, JSON.stringify({ t: Date.now(), b64: b64enc(lastSave) }));
+    lsSet('gba.raw.' + Store.k('save-' + gameKey), JSON.stringify({ t: Date.now(), b64: b64enc(lastSave) }));
   }
 
   // ---------- carregar ROM ----------
@@ -439,35 +473,82 @@
   }
   // Abre um jogo: calcula a chave dele (código + título), busca o save guardado (o mais
   // recente entre a conta e o navegador) e manda a ROM e o save para o motor.
-  async function startRom(data, name) {
-    if (running) { await flushSave(); flushSaveLocalSync(); }
-    running = false;
-    const h = romHeader(data);
+  function gameKeyOf(data, h) {
     let id = (h.code + '_' + h.title).replace(/[^A-Za-z0-9_-]/g, '_');
     if (!/[A-Za-z0-9]/.test(id)) id = 'rom' + crc32(data.subarray(0, 65536)).toString(16);
-    gameKey = id; lastSave = null; lastSaveUnstored = false;
+    return id;
+  }
+  // Abre um jogo: guarda a ROM na biblioteca da conta, busca o save da bateria e,
+  // se existir, retoma o estado automático (o ponto exato em que a pessoa parou).
+  async function startRom(data, name, opts = {}) {
+    if (running) await suspendGame();
+    running = false;
+    const h = romHeader(data);
+    const key = gameKeyOf(data, h);
+    gameKey = key; lastSave = null; lastSaveUnstored = false;
     await Store.ready;
-    let best = await Store.getBlob('save-' + gameKey);
-    const raw = lsGet('gba.raw.save-' + gameKey);
+    if (opts.store !== false) {
+      try {
+        const prev = await LocalDB.get('roms', Store.k(key));
+        if (!prev) await LocalDB.put('roms', Store.k(key), { data, title: h.title, code: h.code, file: name, size: data.length, added: Date.now() });
+      } catch (e) { toast('Não consegui guardar a ROM na biblioteca (espaço do navegador cheio?)', 5000); }
+    }
+    let best = await Store.getBlob('save-' + key);
+    const raw = lsGet('gba.raw.' + Store.k('save-' + key));
     if (raw) { try { const o = JSON.parse(raw); if (!best || o.t > best.t) best = { t: o.t, data: b64dec(o.b64) }; } catch (e) { } }
-    const restored = !!(best && best.data.length);
+    const restored = !!(best && best.data && best.data.length);
     Object.assign(game, { title: h.title, code: h.code });
     const rom = data.slice().buffer;
     const sv = restored ? best.data.slice().buffer : null;
     send({ t: 'load', rom, save: sv }, sv ? [rom, sv] : [rom]);
     if (restored) lastSave = best.data;
     const bios = lsGet('gba.bios'); if (bios) { try { send({ t: 'bios', d: b64dec(bios).buffer }); } catch (e) { } }
+    // retoma de onde parou
+    let resumed = false;
+    if (opts.resume !== false) {
+      const st = await Store.getBlob('state-' + key + '-auto');
+      if (st && st.data) {
+        const d = st.data.slice().buffer;
+        const r = await rpc({ t: 'loadState', d }, [d]);
+        resumed = !r.err;
+      }
+    }
+    meta = (await Store.getJSON('game-' + key)) || { playTime: 0 };
+    meta.lastPlayed = Date.now(); meta.title = h.title; meta.file = name;
+    Store.putJSON('game-' + key, meta);
+    showView('game');
     $('#drop').classList.add('hidden');
     document.body.classList.add('playing');
-    running = true; paused = false; clearAudio(); lastFFMsg = ''; lastKeys = -1;
+    running = true; paused = false; clearAudio(); lastFFMsg = ''; lastKeys = -1; lastAutoT = performance.now();
     send({ t: 'pause', v: false });
     document.body.classList.remove('paused');
     $('#btnPause').textContent = 'Pausar';
     ['#btnPause', '#btnReset', '#btnSaveState', '#btnLoadState', '#btnImport', '#btnShot'].forEach(s => $(s).disabled = false);
     updateCloudBadge(); updateFFUI(); fitScreen();
     initAudio();
-    toast(`${h.title || name} carregado${restored ? ' — save restaurado' : ''}`);
+    toast(`${h.title || name}${resumed ? ' — continuando de onde você parou' : restored ? ' — save restaurado' : ' carregado'}`);
     document.title = (h.title || 'GBA') + ' — Emulador GBA';
+  }
+  // Guarda o ponto exato do jogo atual (estado automático + miniatura + tempo jogado)
+  let meta = null, lastAutoT = 0, playAcc = 0;
+  async function suspendGame() {
+    if (!running || !gameKey) return;
+    const key = gameKey;
+    try {
+      const r = await rpc({ t: 'saveState' });
+      if (!r.err) await Store.putBlob('state-' + key + '-auto', new Uint8Array(r.d), { thumb: thumbnail() });
+    } catch (e) { console.warn(e); }
+    await flushSave(); flushSaveLocalSync();
+    if (meta) { meta.playTime = (meta.playTime || 0) + Math.round(playAcc / 1000); playAcc = 0; meta.lastPlayed = Date.now(); meta.thumb = thumbnail(); await Store.putJSON('game-' + key, meta); }
+  }
+  // miniatura 240×160 da última imagem do jogo (JPEG pequeno)
+  const thumbCanvas = document.createElement('canvas'); thumbCanvas.width = 240; thumbCanvas.height = 160;
+  function thumbnail() {
+    try {
+      const c = thumbCanvas.getContext('2d');
+      c.putImageData(new ImageData(new Uint8ClampedArray(renderer.src.slice().buffer), 240, 160), 0, 0);
+      return thumbCanvas.toDataURL('image/jpeg', 0.82);
+    } catch (e) { return null; }
   }
   $('#romInput').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) openFile(f); e.target.value = ''; });
   const pickRom = () => { initAudio(); $('#romInput').click(); };
@@ -542,36 +623,238 @@
   $('#btnMute').addEventListener('click', () => { S.muted = S.muted ? 0 : 1; saveSettings(); applySettings(); initAudio(); });
   $('#vol').addEventListener('input', (e) => { S.volume = +e.target.value; saveSettings(); });
 
+  // ---------- estados salvos (espaços 1–4 + automático) ----------
+  // "auto" é gravado sozinho ao sair do jogo, trocar de jogo, fechar a página e a cada 2 minutos.
+  const SLOTS = ['auto', '1', '2', '3', '4'];
   let stateBusy = false;
-  async function saveState() {
+  async function saveState(slot = '1') {
     if (!running || stateBusy) return;
     stateBusy = true;
     try {
       const r = await rpc({ t: 'saveState' });
       if (r.err) throw new Error(r.err);
-      const u8 = new Uint8Array(r.d);
-      toast('Salvando estado…');
-      const where = await Store.putBlob('state-' + gameKey, u8);
-      toast(where === 'cloud' ? 'Estado salvo (na sua conta)' : 'Estado salvo (neste navegador)');
+      const where = await Store.putBlob('state-' + gameKey + '-' + slot, new Uint8Array(r.d), { thumb: thumbnail() });
+      if (slot !== 'auto') toast(`Estado salvo no espaço ${slot}` + (where === 'cloud' ? ' (na sua conta)' : ''));
     } catch (e) { console.error(e); toast('Não consegui salvar o estado: ' + e.message, 5000); }
     stateBusy = false;
+    if (statesOpen()) renderStates();
   }
-  async function loadState() {
+  async function loadState(slot = '1') {
     if (!running || stateBusy) return;
     stateBusy = true;
     try {
-      const got = await Store.getBlob('state-' + gameKey);
-      if (!got) toast('Nenhum estado salvo para este jogo');
+      let got = await Store.getBlob('state-' + gameKey + '-' + slot);
+      if (!got && slot === '1') got = await Store.getBlob('state-' + gameKey);   // estados da versão anterior
+      if (!got || !got.data) toast(slot === 'auto' ? 'Ainda não há um ponto automático' : `O espaço ${slot} está vazio`);
       else {
         const d = got.data.slice().buffer;
         const r = await rpc({ t: 'loadState', d }, [d]);
-        if (r.err) toast(r.err, 4000); else { clearAudio(); toast('Estado carregado'); }
+        if (r.err) toast(r.err, 4000); else { clearAudio(); toast(slot === 'auto' ? 'Voltou ao ponto automático' : `Estado ${slot} carregado`); closeStates(); }
       }
     } catch (e) { console.error(e); toast('Não consegui carregar o estado: ' + e.message, 5000); }
     stateBusy = false;
   }
-  $('#btnSaveState').addEventListener('click', saveState);
-  $('#btnLoadState').addEventListener('click', loadState);
+  const statesEl = $('#states');
+  function statesOpen() { return statesEl.classList.contains('open'); }
+  function openStates() { if (!running) return; closeQuick(); statesEl.classList.add('open'); renderStates(); }
+  function closeStates() { statesEl.classList.remove('open'); }
+  async function renderStates() {
+    const list = $('#slotList'); list.innerHTML = '';
+    for (const slot of SLOTS) {
+      const rec = await Store.getBlob('state-' + gameKey + '-' + slot, true) || (slot === '1' ? await Store.getBlob('state-' + gameKey, true) : null);
+      const row = document.createElement('div'); row.className = 'slot';
+      const img = document.createElement(rec && rec.thumb ? 'img' : 'div'); img.className = 'thumb';
+      if (rec && rec.thumb) img.src = rec.thumb;
+      const info = document.createElement('div'); info.className = 'info';
+      const b = document.createElement('b'); b.textContent = slot === 'auto' ? 'Automático' : 'Espaço ' + slot;
+      const small = document.createElement('span'); small.className = 'muted';
+      small.textContent = rec ? when(rec.t) : (slot === 'auto' ? 'gravado sozinho quando você sai do jogo' : 'vazio');
+      info.append(b, small);
+      const btns = document.createElement('div'); btns.className = 'btns';
+      if (slot !== 'auto') { const sv = document.createElement('button'); sv.textContent = 'Salvar aqui'; sv.onclick = () => saveState(slot); btns.appendChild(sv); }
+      const ld = document.createElement('button'); ld.textContent = 'Carregar'; ld.className = 'primary'; ld.disabled = !rec; ld.onclick = () => loadState(slot); btns.appendChild(ld);
+      row.append(img, info, btns); list.appendChild(row);
+    }
+  }
+  $('#btnSaveState').addEventListener('click', openStates);
+  $('#btnLoadState').addEventListener('click', openStates);
+  $('#btnCloseStates').addEventListener('click', closeStates);
+  statesEl.addEventListener('pointerdown', (e) => { if (e.target === statesEl) closeStates(); });
+  function when(t) {
+    const d = (Date.now() - t) / 1000;
+    if (d < 60) return 'agora mesmo';
+    if (d < 3600) return `há ${Math.floor(d / 60)} min`;
+    if (d < 86400) return `há ${Math.floor(d / 3600)} h`;
+    if (d < 86400 * 7) return `há ${Math.floor(d / 86400)} dia${d >= 172800 ? 's' : ''}`;
+    return new Date(t).toLocaleDateString('pt-BR');
+  }
+  function duration(sec) {
+    if (sec === undefined || sec === null) return 'nunca jogado';
+    if (sec < 60) return 'menos de 1 min jogado';
+    const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60);
+    return h ? `${h} h ${m} min jogados` : `${Math.max(1, m)} min jogados`;
+  }
+
+  // ---------- caixa de diálogo (confirmar / perguntar) ----------
+  function dialog({ title, text, fields = [], ok = 'OK', danger = false, cancel = 'Cancelar' }) {
+    return new Promise((res) => {
+      const bg = $('#dialog'); $('#dlgTitle').textContent = title; $('#dlgText').textContent = text || '';
+      const box = $('#dlgFields'); box.innerHTML = '';
+      const inputs = fields.map(f => { const i = document.createElement('input'); i.type = f.type || 'text'; i.placeholder = f.label; i.autocomplete = 'off'; box.appendChild(i); return i; });
+      const okB = $('#dlgOk'), noB = $('#dlgCancel');
+      okB.textContent = ok; okB.className = danger ? 'danger' : 'primary'; noB.textContent = cancel;
+      const done = (v) => { bg.classList.remove('open'); okB.onclick = noB.onclick = null; res(v); };
+      okB.onclick = () => done(fields.length ? inputs.map(i => i.value) : true);
+      noB.onclick = () => done(null);
+      bg.classList.add('open');
+      if (inputs[0]) setTimeout(() => inputs[0].focus(), 30);
+      box.onkeydown = (e) => { if (e.key === 'Enter') okB.click(); };
+    });
+  }
+
+  // ---------- telas: login, biblioteca e jogo ----------
+  let view = 'login';
+  function showView(v) {
+    view = v;
+    document.body.classList.toggle('v-login', v === 'login');
+    document.body.classList.toggle('v-lib', v === 'lib');
+    document.body.classList.toggle('v-game', v === 'game');
+    if (v !== 'game' && running) { paused = true; send({ t: 'pause', v: true }); }
+    if (v === 'lib') renderLibrary();
+    if (v === 'login') renderLogin();
+    fitScreen();
+  }
+  async function goLibrary() {
+    if (running) { await suspendGame(); running = false; document.body.classList.remove('playing'); }
+    showView('lib');
+  }
+  async function renderLibrary() {
+    $('#libHello').textContent = Store.user.guest ? 'Jogando como convidado' : `Olá, ${Store.user.name}`;
+    const grid = $('#libGrid'); grid.innerHTML = '';
+    let keys = [];
+    try { keys = await LocalDB.keys('roms', Store.user.id + '/'); } catch (e) { }
+    const games = [];
+    for (const k of keys) {
+      const key = k.slice(Store.user.id.length + 1);
+      const rom = await LocalDB.get('roms', k);
+      const m = (await Store.getJSON('game-' + key)) || {};
+      games.push({ key, rom, m });
+    }
+    games.sort((a, b) => (b.m.lastPlayed || b.rom.added || 0) - (a.m.lastPlayed || a.rom.added || 0));
+    $('#libEmpty').style.display = games.length ? 'none' : '';
+    for (const g of games) {
+      const card = document.createElement('div'); card.className = 'card';
+      const cover = document.createElement('div'); cover.className = 'cover';
+      if (g.m.thumb) { const im = document.createElement('img'); im.src = g.m.thumb; cover.appendChild(im); }
+      else { const t = document.createElement('span'); t.textContent = (g.rom.title || g.rom.file || '?').slice(0, 2); cover.appendChild(t); }
+      const play = document.createElement('div'); play.className = 'play'; play.textContent = g.m.lastPlayed ? '▶ Continuar' : '▶ Jogar'; cover.appendChild(play);
+      const name = document.createElement('b'); name.textContent = g.rom.title || g.rom.file;
+      const sub = document.createElement('span'); sub.className = 'muted';
+      sub.textContent = g.m.lastPlayed ? 'jogado ' + when(g.m.lastPlayed) + ' · ' + duration(g.m.playTime || 0) : 'nunca jogado';
+      const menu = document.createElement('button'); menu.className = 'more'; menu.textContent = '⋯'; menu.title = 'Opções';
+      cover.onclick = () => startRom(g.rom.data, g.rom.file, { store: false });
+      menu.onclick = async (e) => {
+        e.stopPropagation();
+        const choice = await gameMenu(g);
+        if (choice === 'restart') { await Store.delBlob('state-' + g.key + '-auto'); startRom(g.rom.data, g.rom.file, { store: false, resume: false }); }
+        if (choice === 'remove') {
+          const okDel = await dialog({ title: 'Remover da biblioteca?', text: `"${g.rom.title || g.rom.file}" sai da sua biblioteca, junto com os estados salvos. O save do jogo (progresso dentro do jogo) é mantido, caso você adicione a ROM de novo.`, ok: 'Remover', danger: true });
+          if (okDel) { await LocalDB.del('roms', Store.k(g.key)); for (const sl of SLOTS) await Store.delBlob('state-' + g.key + '-' + sl); try { await LocalDB.del('meta', Store.k('game-' + g.key)); } catch (e2) { } renderLibrary(); }
+        }
+      };
+      card.append(cover, name, sub, menu); grid.appendChild(card);
+    }
+    updateAccountUI();
+  }
+  function gameMenu(g) {
+    return new Promise((res) => {
+      const bg = $('#gmenu'); $('#gmTitle').textContent = g.rom.title || g.rom.file;
+      bg.classList.add('open');
+      bg.onclick = (e) => { const c = e.target.dataset && e.target.dataset.gm; if (c || e.target === bg) { bg.classList.remove('open'); res(c || null); } };
+    });
+  }
+  $('#libAdd').addEventListener('click', pickRom);
+  $('#btnLibrary').addEventListener('click', goLibrary);
+
+  // ---------- login ----------
+  async function renderLogin() {
+    const list = $('#acctList'); list.innerHTML = '';
+    let accts = []; try { accts = await Accounts.list(); } catch (e) { }
+    $('#acctListWrap').style.display = accts.length ? '' : 'none';
+    for (const a of accts) {
+      const b = document.createElement('button'); b.className = 'acct';
+      const av = document.createElement('i'); av.textContent = a.name.slice(0, 1).toUpperCase();
+      const n = document.createElement('span'); n.textContent = a.name;
+      b.append(av, n);
+      b.onclick = () => { setLoginTab('in'); $('#liUser').value = a.name; $('#liPass').focus(); };
+      list.appendChild(b);
+    }
+    if (!accts.length) setLoginTab('new');
+    $('#storageNote').textContent = LocalDB.ok ? '' : 'Atenção: este navegador não permite guardar dados (modo anônimo?). As contas e saves vão sumir ao fechar a página.';
+  }
+  function setLoginTab(t) {
+    $$('.ltab').forEach(b => b.classList.toggle('on', b.dataset.lt === t));
+    $('#formIn').style.display = t === 'in' ? '' : 'none';
+    $('#formNew').style.display = t === 'new' ? '' : 'none';
+    $('#loginErr').textContent = '';
+  }
+  $$('.ltab').forEach(b => b.addEventListener('click', () => setLoginTab(b.dataset.lt)));
+  async function enterAs(user, remember) {
+    // a primeira conta que entrar depois da atualização herda os saves antigos
+    if (!lsGet('gba.legacyOwner')) { lsSet('gba.legacyOwner', user.id); }
+    user.legacy = lsGet('gba.legacyOwner') === user.id;
+    Store.user = user;
+    if (remember && !user.guest) lsSet('gba.session', user.id); else { try { localStorage.removeItem('gba.session'); } catch (e) { } }
+    loadUserSettings(); applySettings(); loadCloudSettings();
+    showView('lib');
+    if (!user.guest) toast(`Bem-vindo, ${user.name}!`);
+  }
+  $('#formIn').addEventListener('submit', async (e) => {
+    e.preventDefault(); $('#loginErr').textContent = '';
+    const btn = e.submitter || $('#formIn button[type=submit]'); btn.disabled = true;
+    try { const u = await Accounts.login($('#liUser').value, $('#liPass').value); $('#liPass').value = ''; await enterAs(u, $('#liRemember').checked); }
+    catch (err) { $('#loginErr').textContent = err.message; }
+    btn.disabled = false;
+  });
+  $('#formNew').addEventListener('submit', async (e) => {
+    e.preventDefault(); $('#loginErr').textContent = '';
+    if ($('#nuPass').value !== $('#nuPass2').value) { $('#loginErr').textContent = 'As senhas não são iguais'; return; }
+    const btn = e.submitter || $('#formNew button[type=submit]'); btn.disabled = true;
+    try { const u = await Accounts.create($('#nuUser').value, $('#nuPass').value); $('#nuPass').value = $('#nuPass2').value = ''; await enterAs(u, true); }
+    catch (err) { $('#loginErr').textContent = err.message; }
+    btn.disabled = false;
+  });
+  $('#btnGuest').addEventListener('click', () => enterAs(Object.assign({}, Accounts.GUEST), false));
+
+  // ---------- menu da conta ----------
+  function updateAccountUI() {
+    $('#acctBtn').textContent = (Store.user.guest ? '👤 Convidado' : '👤 ' + Store.user.name) + ' ▾';
+    $('#amPass').style.display = $('#amDelete').style.display = Store.user.guest ? 'none' : '';
+  }
+  $('#acctBtn').addEventListener('click', (e) => { e.stopPropagation(); $('#acctMenu').classList.toggle('open'); });
+  document.addEventListener('click', () => $('#acctMenu').classList.remove('open'));
+  $('#amLib').addEventListener('click', goLibrary);
+  async function logout() {
+    if (running) { await suspendGame(); running = false; document.body.classList.remove('playing'); }
+    try { localStorage.removeItem('gba.session'); } catch (e) { }
+    Store.user = Accounts.GUEST; showView('login');
+  }
+  $('#amSwitch').addEventListener('click', logout);
+  $('#amOut').addEventListener('click', logout);
+  $('#amPass').addEventListener('click', async () => {
+    const v = await dialog({ title: 'Mudar senha', fields: [{ label: 'Senha atual', type: 'password' }, { label: 'Senha nova', type: 'password' }], ok: 'Mudar' });
+    if (!v) return;
+    try { await Accounts.changePassword(Store.user.id, v[0], v[1]); toast('Senha alterada'); } catch (e) { toast(e.message, 4000); }
+  });
+  $('#amDelete').addEventListener('click', async () => {
+    const v = await dialog({ title: 'Excluir conta?', text: `Isso apaga a conta "${Store.user.name}" e todos os jogos, saves e estados dela neste navegador. Não dá para desfazer. Digite a senha para confirmar.`, fields: [{ label: 'Senha', type: 'password' }], ok: 'Excluir tudo', danger: true });
+    if (!v) return;
+    try { await Accounts.login(Store.user.id, v[0]); } catch (e) { toast(e.message, 4000); return; }
+    if (running) { running = false; document.body.classList.remove('playing'); send({ t: 'pause', v: true }); }
+    await Accounts.remove(Store.user.id);
+    try { localStorage.removeItem('gba.settings.' + Store.user.id); localStorage.removeItem('gba.session'); } catch (e) { }
+    toast('Conta excluída'); Store.user = Accounts.GUEST; showView('login');
+  });
 
   // exportar / importar save
   $('#btnExport').addEventListener('click', async () => {
@@ -759,7 +1042,7 @@
   $('#quick').addEventListener('pointerdown', (e) => { if (e.target.id === 'quick') closeQuick(); });
   $$('#quick [data-q]').forEach(b => b.addEventListener('click', () => {
     const q = b.dataset.q; closeQuick();
-    if (q === 'pause') togglePause(); else if (q === 'ff') toggleFF(); else if (q === 'save') saveState(); else if (q === 'load') loadState();
+    if (q === 'pause') togglePause(); else if (q === 'ff') toggleFF(); else if (q === 'save' || q === 'load') openStates(); else if (q === 'lib') goLibrary();
     else if (q === 'up') toggleUpscale();
     else if (q === 'full') toggleFullscreen(); else if (q === 'shot') screenshot(); else if (q === 'open') pickRom(); else if (q === 'reset') resetGame(); else if (q === 'settings') openSettings();
   }));
@@ -850,12 +1133,20 @@
   new ResizeObserver(fitScreen).observe($('#stage'));
 
   // salvar ao sair
-  document.addEventListener('visibilitychange', () => { if (document.hidden) { flushSaveLocalSync(); flushSave(); } });
+  document.addEventListener('visibilitychange', () => { if (document.hidden && running) { flushSaveLocalSync(); suspendGame(); } });
   window.addEventListener('pagehide', () => { flushSaveLocalSync(); });
 
-  window.__emu = { settings: () => S, renderer, workerMode: () => workerMode, game };
+  window.__emu = { settings: () => S, renderer, workerMode: () => workerMode, game, store: Store };
   Store.init();
   applySettings();
+  (async () => {
+    await Store.ready;
+    const sess = lsGet('gba.session');
+    if (sess) {
+      try { const a = await LocalDB.get('accounts', sess); if (a) { await enterAs({ id: sess, name: a.name }, true); return; } } catch (e) { }
+    }
+    showView('login');
+  })();
   updateCloudBadge();
   loadCloudSettings();
   renderer.draw();

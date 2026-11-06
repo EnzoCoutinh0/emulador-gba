@@ -23,9 +23,9 @@ async def main():
         # save: jogo com flash que grava; estado; exportar
         await page.set_input_files('#romInput', 'test/build/flash_thumb.gba'); await page.wait_for_timeout(3000)
         print('status flash:', await page.inner_text('#status'))
-        print('localStorage:', await page.evaluate("Object.keys(localStorage).filter(k=>k.includes('save'))"))
-        await page.click('#btnSaveState'); await page.wait_for_timeout(1200); print('toast:', await page.inner_text('#toast'))
-        await page.click('#btnLoadState'); await page.wait_for_timeout(1200); print('toast:', await page.inner_text('#toast'))
+        print('saves no IndexedDB:', await page.evaluate("LocalDB.keys('blobs','').then(k=>k.filter(x=>x.includes('save-')))"))
+        await page.keyboard.press('F2'); await page.wait_for_timeout(1200); print('toast:', await page.inner_text('#toast'))
+        await page.keyboard.press('F4'); await page.wait_for_timeout(1200); print('toast:', await page.inner_text('#toast'))
         async with page.expect_download() as d: await page.click('#btnExport')
         dl = await d.value; import os; print('export:', dl.suggested_filename, os.path.getsize(await dl.path()))
         await page.keyboard.down('KeyX'); await page.wait_for_timeout(80); print('keys X:', hex(await page.evaluate('window.__keys')))

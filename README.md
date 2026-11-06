@@ -16,7 +16,10 @@ Um emulador de **Game Boy Advance** que roda direto no navegador, escrito do zer
 - **BIOS emulada:** não precisa da BIOS original da Nintendo (mas aceita, se você tiver a sua)
 - **Saves:** SRAM, Flash 64/128 KB e EEPROM, detectados automaticamente e guardados no navegador
 - **Relógio (RTC):** usado por Pokémon Ruby, Sapphire e Emerald, sincronizado com a hora do seu computador
-- **Save states:** salve e carregue o jogo em qualquer momento
+- **Contas:** login com senha (protegida com PBKDF2), cada conta com os próprios jogos, saves, estados e controles
+- **Biblioteca de jogos:** seus jogos ficam guardados com a imagem do ponto em que você parou, a data e o tempo jogado
+- **Continuar de onde parou:** cada jogo grava sozinho o momento exato ao sair, trocar de jogo ou a cada 2 minutos, então dá para alternar entre vários jogos e cada um continua dali
+- **Save states:** 4 espaços com miniatura, além do automático
 - **Acelerar:** de 2x a 16x, ou na velocidade máxima, com som acelerado contínuo
 - **Upscaling opcional:** imagem original (pixels nítidos) ou filtros **xBR**, Scale2x/Scale4x, suave, grade de LCD e TV antiga (CRT), desenhados na resolução real do monitor, até 4K
 - **Captura de tela em 4K:** PNG em 3840×2560 com o filtro escolhido
@@ -28,8 +31,11 @@ Um emulador de **Game Boy Advance** que roda direto no navegador, escrito do zer
 ## Como usar
 
 1. Abra o emulador (pelo link acima ou dando dois cliques em `index.html`)
-2. Clique em **Abrir ROM** ou arraste um arquivo `.gba` ou `.zip` para a tela
-3. Jogue!
+2. Crie uma conta (ou jogue como convidado)
+3. Clique em **Adicionar jogo** ou arraste um arquivo `.gba` ou `.zip` para a tela
+4. Jogue! Para trocar de jogo, volte à **Biblioteca**: cada jogo continua de onde parou
+
+As contas e os jogos ficam guardados no navegador (IndexedDB), separados por conta. Como o emulador não tem servidor, uma conta criada num computador não aparece em outro.
 
 A ROM nunca sai do seu aparelho: nada é enviado para servidor nenhum.
 
@@ -47,7 +53,7 @@ A ROM nunca sai do seu aparelho: nada é enviado para servidor nenhum.
 | `Espaço` (segurar) | Acelerar |
 | `Tab` | Acelerar (liga/desliga) |
 | `U` | Liga/desliga o upscaling |
-| `F2` / `F4` | Salvar / carregar estado |
+| `F2` / `F4` | Salvar / carregar o estado do espaço 1 |
 | `F9` | Captura de tela em 4K |
 | `F` | Tela cheia |
 | `P` | Pausar |
@@ -111,7 +117,8 @@ A emulação roda num **Web Worker**, separada da página. Assim, gravar o save,
 | `src/gba.js` | Junta as peças, roda um quadro e faz os save states |
 | `src/engine.js` | Motor que roda no Web Worker e conversa com a página por mensagens |
 | `src/renderer.js` | Desenha pela placa de vídeo com os filtros (shaders GLSL) |
-| `src/ui.js` | Interface: configurações, teclado, gamepad, toque, saves |
+| `src/accounts.js` | Contas (senhas com PBKDF2) e armazenamento no IndexedDB |
+| `src/ui.js` | Interface: login, biblioteca, configurações, teclado, gamepad, toque, saves e estados |
 | `src/template.html` | Layout e visual da página |
 
 O código é todo comentado em português, explicando o que cada parte faz e por quê.
