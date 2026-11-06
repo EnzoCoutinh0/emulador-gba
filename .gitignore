@@ -1,0 +1,10 @@
+# arquivos gerados na compilação
+core.js
+test/build/
+exemplos/astro-defensor/build/
+*.cpuprofile
+__pycache__/
+# saídas dos testes
+test/*.png
+test/*.raw
+dist/

@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Emulador GBA</title>
+<!--
+=====================================================================
+template.html — O ESQUELETO DA PÁGINA
+=====================================================================
+Aqui ficam o visual (CSS dentro de <style>) e a estrutura (HTML).
+Na hora de montar o arquivo final, o build.py troca os marcadores
+CORE e UI pelo código JavaScript do emulador e da interface.
+=====================================================================
+-->
+<style>
+  /* Cores e tamanhos usados em todo o visual. --ts = tamanho dos botões de toque, --to = opacidade deles. */
+  :root {
+    --bg: #0e0f14; --panel: #171922; --panel2: #1f2230; --line: #2b2f40; --text: #e8e9f0; --muted: #9a9db0;
+    --accent: #8b6cff; --accent2: #b9a6ff; --ok: #4fd18b; --warn: #f0b552; --ts: 1; --to: .75;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  body { display: flex; flex-direction: column; min-height: 100%; overscroll-behavior: none; }
+  header { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 15px; margin: 0; font-weight: 650; letter-spacing: .2px; white-space: nowrap; }
+  header h1 span { color: var(--accent2); }
+  .badge { margin-left: auto; font-size: 12px; padding: 3px 9px; border-radius: 99px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .badge.ok { color: var(--ok); border-color: #2c5a43; }
+  .badge.warn { color: var(--warn); border-color: #5e4a25; }
+  main { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) 290px; gap: 16px; padding: 16px; min-height: 0; }
+  .left { display: flex; flex-direction: column; gap: 12px; min-width: 0; min-height: 0; }
+  #player { position: relative; flex: 1; display: flex; flex-direction: column; min-height: 240px; }
+  #stage { position: relative; flex: 1; min-height: 240px; background: #000; border-radius: 14px; display: flex; align-items: center; justify-content: center; overflow: hidden; border: 1px solid var(--line); }
+  #screen { display: block; background: #000; }
+  #drop { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; cursor: pointer; background: radial-gradient(ellipse at center, #1c1730 0%, #0b0c10 70%); text-align: center; padding: 20px; z-index: 2; }
+  #drop.hidden { display: none; }
+  #drop .big { font-size: 20px; font-weight: 650; }
+  #drop .small { color: var(--muted); max-width: 420px; }
+  #drop .cta { margin-top: 6px; background: var(--accent); color: #fff; border-radius: 10px; padding: 10px 18px; font-weight: 600; }
+  body.dragging #stage { outline: 3px dashed var(--accent); outline-offset: -8px; }
+  #osd { position: absolute; top: 10px; left: 10px; display: flex; gap: 6px; z-index: 3; pointer-events: none; }
+  #osd span { font-size: 12px; font-weight: 700; letter-spacing: .5px; background: rgba(0,0,0,.62); padding: 3px 8px; border-radius: 6px; display: none; }
+  body.paused #osd .p, body.ff #osd .f { display: inline-block; }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  button, select { font: inherit; color: var(--text); background: var(--panel2); border: 1px solid var(--line); border-radius: 9px; padding: 7px 12px; cursor: pointer; }
+  button:hover:not(:disabled) { border-color: #444a63; background: #262a3b; }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  button.active { border-color: var(--accent); color: var(--accent2); background: #241f3d; }
+  .split { display: inline-flex; }
+  .split button { border-radius: 9px 0 0 9px; }
+  .split select { border-radius: 0 9px 9px 0; border-left: 0; padding: 7px 6px; }
+  #status { color: var(--muted); font-size: 12.5px; min-height: 18px; font-variant-numeric: tabular-nums; }
+  input[type=range] { accent-color: var(--accent); width: 100px; }
+  aside { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; overflow: auto; }
+  aside h2, .modal h3 { font-size: 12.5px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); margin: 4px 0 8px; font-weight: 650; }
+  aside section + section { margin-top: 18px; }
+  .keys { display: grid; grid-template-columns: auto 1fr; gap: 5px 12px; align-items: center; }
+  kbd { font: 12px ui-monospace, Menlo, monospace; background: var(--panel2); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 6px; padding: 1px 6px; white-space: nowrap; }
+  .muted { color: var(--muted); font-size: 12.5px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; align-items: center; }
+  #toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(20px); background: #262a3b; border: 1px solid #3a3f57; color: var(--text); padding: 10px 16px; border-radius: 10px; opacity: 0; pointer-events: none; transition: .2s; max-width: 90vw; z-index: 200; box-shadow: 0 8px 30px rgba(0,0,0,.4); }
+  #toast.show { opacity: 1; transform: translateX(-50%); }
+
+  /* ---------- modal de configurações: janela por cima da página, com abas ---------- */
+  .modal-bg { position: fixed; inset: 0; background: rgba(5,6,10,.7); z-index: 100; display: none; align-items: center; justify-content: center; padding: 16px; }
+  .modal-bg.open { display: flex; }
+  .modal { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; width: min(760px, 100%); max-height: min(88vh, 900px); display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,.5); }
+  .modal-head { display: flex; align-items: center; padding: 12px 14px 0 16px; gap: 10px; }
+  .modal-head b { font-size: 16px; }
+  .modal-head button { margin-left: auto; }
+  .tabs { display: flex; gap: 4px; padding: 10px 12px 0; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
+  .tabs button { border: 0; background: none; border-radius: 8px 8px 0 0; padding: 8px 12px; color: var(--muted); white-space: nowrap; border-bottom: 2px solid transparent; }
+  .tabs button.on { color: var(--text); border-bottom-color: var(--accent); }
+  .tabpanes { overflow: auto; padding: 14px 16px 18px; }
+  .pane { display: none; } .pane.on { display: block; }
+  table.binds { width: 100%; border-collapse: collapse; }
+  table.binds th { text-align: left; font-size: 12px; color: var(--muted); font-weight: 600; padding: 4px 6px; }
+  table.binds td { padding: 4px 6px; border-top: 1px solid #23263300; }
+  table.binds tr.live td:first-child { color: var(--ok); }
+  .bind { min-width: 104px; width: 100%; text-align: left; font: 12.5px ui-monospace, Menlo, monospace; display: flex; justify-content: space-between; gap: 6px; }
+  .bind.empty { color: #5d6177; }
+  .bind.wait { border-color: var(--accent); color: var(--accent2); animation: pulse 1s infinite; }
+  @keyframes pulse { 50% { background: #2b2450; } }
+  .field { display: grid; grid-template-columns: 180px 1fr; gap: 10px; align-items: center; margin: 10px 0; }
+  .field label { color: var(--text); }
+  .note { background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; color: var(--muted); font-size: 12.5px; margin: 8px 0; }
+  .pads { display: flex; flex-direction: column; gap: 4px; margin: 6px 0 10px; }
+  .pads .pad { font-size: 12.5px; color: var(--ok); } .pads .none { color: var(--muted); font-size: 12.5px; }
+
+  /* ---------- menu rápido ---------- */
+  #quick { position: fixed; inset: 0; z-index: 90; background: rgba(5,6,10,.6); display: none; align-items: center; justify-content: center; }
+  #quick.open { display: flex; }
+  #quick .box { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 14px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: min(420px, 92vw); }
+  #quick .box button { padding: 12px; }
+
+  /* ---------- controles de toque ----------
+     Dois layouts:
+       • em pé (retrato): os botões ficam numa grade abaixo da tela;
+       • deitado (paisagem) ou em tela cheia: o jogo ocupa tudo e os botões
+         ficam por cima, semitransparentes, nos cantos. */
+  #touch { display: none; user-select: none; -webkit-user-select: none; touch-action: none; }
+  body.touch #touch { display: grid; max-width: 100%; overflow: visible; }
+  #touch button, #touch .zone { touch-action: none; }
+  .tbtn { background: var(--panel2); border: 1px solid var(--line); color: var(--text); font-weight: 700; padding: 0; }
+  .tbtn.on, .round.on { background: var(--accent) !important; border-color: var(--accent) !important; color: #fff; }
+  .dpad { position: relative; width: min(calc(150px * var(--ts)), 35vw, 42vh); aspect-ratio: 1; border-radius: 50%; background: rgba(23,25,34,.9); border: 1px solid var(--line); }
+  .dpad i { position: absolute; background: var(--panel2); border-radius: 8px; border: 1px solid #343850; }
+  .dpad i.v { left: 33.3%; top: 6.7%; width: 33.3%; height: 86.6%; } .dpad i.h { top: 33.3%; left: 6.7%; height: 33.3%; width: 86.6%; }
+  .dpad.u i.v { box-shadow: inset 0 calc(30px * var(--ts)) 0 -2px var(--accent); }
+  .dpad.d i.v { box-shadow: inset 0 calc(-30px * var(--ts)) 0 -2px var(--accent); }
+  .dpad.l i.h { box-shadow: inset calc(30px * var(--ts)) 0 0 -2px var(--accent); }
+  .dpad.r i.h { box-shadow: inset calc(-30px * var(--ts)) 0 0 -2px var(--accent); }
+  .abzone { position: relative; width: min(calc(150px * var(--ts)), 35vw, 42vh); aspect-ratio: 1; }
+  .abzone .round { position: absolute; width: 46%; height: 46%; border-radius: 50%; font-size: calc(19px * var(--ts)); background: #2a2440; border: 1px solid #3d3463; color: var(--text); font-weight: 700; display: flex; align-items: center; justify-content: center; }
+  .abzone .a { right: 0; top: 12%; } .abzone .b { left: 0; top: 42%; }
+  .pill { width: min(calc(70px * var(--ts)), 18vw); height: calc(30px * var(--ts)); border-radius: 99px; font-size: calc(11px * var(--ts)); }
+  .sh { width: min(calc(96px * var(--ts)), 24vw); height: calc(38px * var(--ts)); border-radius: 12px; font-size: calc(14px * var(--ts)); }
+  .mini { width: calc(44px * var(--ts)); height: calc(32px * var(--ts)); border-radius: 10px; font-size: calc(14px * var(--ts)); }
+  /* retrato: controles abaixo da tela */
+  body.touch:not(.land) #touch { grid-template-columns: 1fr auto 1fr; grid-template-areas: "l mid2 r" "dpad mid ab"; gap: 10px 2px; align-items: center; padding: 10px 0 4px; width: 100%; }
+  body.touch:not(.land) .tl { grid-area: l; justify-self: start; } body.touch:not(.land) .tr { grid-area: r; justify-self: end; }
+  body.touch:not(.land) .dpad { grid-area: dpad; justify-self: start; } body.touch:not(.land) .abzone { grid-area: ab; justify-self: end; }
+  body.touch:not(.land) .mid { grid-area: mid; } body.touch:not(.land) .top { grid-area: mid2; }
+  .mid, .top { display: flex; flex-direction: column; gap: 12px; align-items: center; }
+  .top { flex-direction: row; gap: 8px; }
+  body.touch:not(.land) #stage { flex: none; aspect-ratio: 3 / 2; min-height: 0; }
+  body.touch:not(.land) #player { flex: none; min-height: 0; }
+  /* paisagem: tudo sobreposto em tela cheia */
+  body.touch.land.playing #player, #player:fullscreen { position: fixed; inset: 0; z-index: 50; background: #000; min-height: 0; }
+  body.touch.land.playing #stage, #player:fullscreen #stage { border-radius: 0; border: 0; min-height: 0; height: 100%; }
+  body.touch.land #touch, #player:fullscreen #touch { position: absolute; inset: 0; pointer-events: none; z-index: 5; display: block; }
+  body:not(.touch) #player:fullscreen #touch { display: none; }
+  body.touch.land #touch > *, #player:fullscreen #touch > * { position: absolute; pointer-events: auto; opacity: var(--to); }
+  body.touch.land .dpad, #player:fullscreen .dpad { left: calc(18px + env(safe-area-inset-left)); bottom: 7%; }
+  body.touch.land .abzone, #player:fullscreen .abzone { right: calc(18px + env(safe-area-inset-right)); bottom: 7%; }
+  body.touch.land .tl, #player:fullscreen .tl { left: calc(14px + env(safe-area-inset-left)); top: 12px; }
+  body.touch.land .tr, #player:fullscreen .tr { right: calc(14px + env(safe-area-inset-right)); top: 12px; }
+  body.touch.land .mid, #player:fullscreen .mid { left: 50%; bottom: 8px; transform: translateX(-50%); flex-direction: row; }
+  body.touch.land .top, #player:fullscreen .top { left: 50%; top: 8px; transform: translateX(-50%); }
+  body.touch.land.playing header, body.touch.land.playing aside, body.touch.land.playing .bar, body.touch.land.playing #status { display: none; }
+  body.touch.playing aside { display: none; }
+  body.touch main { grid-template-columns: 1fr; }
+  @media (max-width: 860px) {
+    main { grid-template-columns: 1fr; padding: 10px; gap: 10px; }
+    aside { order: 3; }
+    #stage { min-height: 0; flex: none; aspect-ratio: 3 / 2; }
+    #player { flex: none; min-height: 0; }
+    .field { grid-template-columns: 1fr; gap: 4px; }
+  }
+</style>
+</head>
+<body>
+<!-- Cabeçalho: título, onde os saves estão guardados e atalho para as configurações -->
+<header>
+  <h1>Emulador <span>GBA</span></h1>
+  <div id="cloud" class="badge">Verificando armazenamento…</div>
+  <button id="btnSettings2" title="Configurações">⚙</button>
+</header>
+<main>
+  <div class="left">
+    <!-- "player" = tela do jogo + controles de toque. É ele que vai para a tela cheia. -->
+    <div id="player">
+      <div id="stage">
+        <!-- O canvas onde o WebGL desenha a imagem na resolução do monitor -->
+        <canvas id="screen" width="240" height="160"></canvas>
+        <div id="osd"><span class="p">PAUSADO</span><span class="f" id="osdFF">⏩ 4x</span></div>
+        <div id="drop">
+          <div class="big">Abra uma ROM de Game Boy Advance</div>
+          <div class="small">Clique aqui ou arraste um arquivo <b>.gba</b> (ou <b>.zip</b>). A ROM fica só no seu aparelho; nada é enviado.</div>
+          <div class="cta">Abrir ROM</div>
+        </div>
+      </div>
+      <!-- Controles virtuais. data-act = botão do GBA; data-zone = áreas que entendem a posição do dedo -->
+      <div id="touch">
+        <button class="tbtn sh tl" data-act="l">L</button>
+        <button class="tbtn sh tr" data-act="r">R</button>
+        <div class="top">
+          <button class="tbtn mini" data-cmd="menu" title="Menu">☰</button>
+          <button class="tbtn mini" data-cmd="ff" id="tFF" title="Acelerar">⏩</button>
+        </div>
+        <div class="dpad zone" data-zone="dpad"><i class="h"></i><i class="v"></i></div>
+        <div class="mid">
+          <button class="tbtn pill" data-act="select">SELECT</button>
+          <button class="tbtn pill" data-act="start">START</button>
+        </div>
+        <div class="abzone zone" data-zone="ab">
+          <div class="round a">A</div>
+          <div class="round b">B</div>
+        </div>
+      </div>
+    </div>
+    <!-- Barra principal de botões -->
+    <div class="bar">
+      <button id="btnOpen" class="primary">Abrir ROM</button>
+      <button id="btnPause" disabled>Pausar</button>
+      <button id="btnReset" disabled>Reiniciar</button>
+      <button id="btnSaveState" disabled>Salvar estado</button>
+      <button id="btnLoadState" disabled>Carregar estado</button>
+      <span class="split"><button id="btnFF" title="Acelerar">⏩ Acelerar</button><select id="ffSpeed" title="Velocidade do acelerar"></select></span>
+      <button id="btnMute">🔊</button>
+      <input id="vol" type="range" min="0" max="100" value="80" title="Volume">
+      <button id="btnFull">Tela cheia</button>
+      <select id="filterQuick" title="Upscaling (tecla U liga/desliga)"></select>
+      <button id="btnShot" disabled title="Salva a imagem em 3840×2560 (F9)">📷 Captura 4K</button>
+      <button id="btnSettings">⚙ Configurações</button>
+    </div>
+    <div id="status">Nenhum jogo carregado</div>
+  </div>
+  <!-- Painel lateral: resumo dos controles e o save do jogo -->
+  <aside>
+    <section>
+      <h2>Seus controles</h2>
+      <div class="keys" id="keyHelp"></div>
+      <div class="row"><button id="btnEditKeys">Mudar controles</button></div>
+    </section>
+    <section>
+      <h2>Save do jogo</h2>
+      <p class="muted">Quando você salva dentro do jogo, o save é guardado automaticamente e volta na próxima vez que abrir a mesma ROM.</p>
+      <div class="row">
+        <button id="btnExport" disabled>Exportar save</button>
+        <button id="btnImport" disabled>Importar save</button>
+      </div>
+      <p class="muted" id="exportNote">Gera o arquivo .sav, que funciona em outros emuladores.</p>
+    </section>
+  </aside>
+</main>
+
+<!-- Janela de configurações (abas: teclado, gamepad, tela, velocidade, celular, avançado) -->
+<div class="modal-bg" id="settings">
+  <div class="modal" role="dialog" aria-label="Configurações">
+    <div class="modal-head"><b>Configurações</b><button id="btnCloseSettings">Fechar</button></div>
+    <div class="tabs">
+      <button data-tab="kb" class="on">Teclado</button>
+      <button data-tab="gp">Gamepad</button>
+      <button data-tab="video">Tela e upscaling</button>
+      <button data-tab="speed">Velocidade e som</button>
+      <button data-tab="touch">Celular</button>
+      <button data-tab="adv">Avançado</button>
+    </div>
+    <div class="tabpanes">
+      <div class="pane on" data-pane="kb">
+        <p class="muted">Clique num campo e aperte a tecla que quiser. <kbd>Esc</kbd> cancela. O ✕ apaga a tecla.</p>
+        <table class="binds" id="kbTable"></table>
+        <div class="row"><button id="kbReset">Restaurar padrão do teclado</button></div>
+      </div>
+      <div class="pane" data-pane="gp">
+        <div class="pads" id="padList"></div>
+        <p class="muted">Clique num campo e aperte o botão (ou mova o analógico) no controle. Funciona com controles de Xbox, PlayStation, 8BitDo e genéricos.</p>
+        <table class="binds" id="gpTable"></table>
+        <div class="field"><label for="deadzone">Zona morta do analógico</label><input type="range" id="deadzone" min="10" max="90" value="40"></div>
+        <div class="row"><button id="gpReset">Restaurar padrão do gamepad</button></div>
+      </div>
+      <div class="pane" data-pane="video">
+        <div class="field"><label for="filter">Upscaling da imagem</label><select id="filter"></select></div>
+        <div class="field"><label for="fit">Ajuste da imagem</label>
+          <select id="fit"><option value="fit">Preencher mantendo proporção</option><option value="integer">Escala inteira (pixels perfeitos)</option><option value="stretch">Esticar</option></select></div>
+        <div class="field"><label for="cc">Cores do GBA original</label><select id="cc"><option value="0">Desligado (cores vivas)</option><option value="1">Ligado (como a tela do GBA)</option></select></div>
+        <div class="note" id="resNote"></div>
+        <p class="muted">Você escolhe: <b>Original</b> mostra os pixels exatamente como no GBA, só que maiores. Os modos de <b>upscaling</b> redesenham a imagem para telas grandes. A escolha fica também na barra principal, e a tecla <kbd>U</kbd> liga e desliga.</p>
+        <p class="muted"><b>xBR</b> é o filtro mais usado em emuladores para telas grandes: ele reconhece bordas e curvas e as redesenha suaves, sem borrar. O botão <b>📷 Captura 4K</b> salva a imagem em 3840×2560 com o filtro escolhido.</p>
+        <p class="muted">O GBA gera imagens de 240×160. O emulador desenha na resolução real do seu monitor (até 4K ou mais) pela placa de vídeo, e o filtro define como os pixels são ampliados. Para usar em 4K, coloque em tela cheia num monitor 4K. Os filtros Scale2x/Scale4x arredondam as bordas diagonais; a grade de LCD e a TV antiga imitam telas reais.</p>
+      </div>
+      <div class="pane" data-pane="speed">
+        <div class="field"><label for="ffSpeed2">Velocidade do acelerar</label><select id="ffSpeed2"></select></div>
+        <div class="field"><label for="ffAudio">Som ao acelerar</label><select id="ffAudio"><option value="1">Tocar (acelerado)</option><option value="0">Silenciar</option></select></div>
+        <div class="field"><label for="turboRate">Velocidade do turbo A/B</label><select id="turboRate"><option value="2">Muito rápido</option><option value="4">Rápido</option><option value="8">Médio</option></select></div>
+        <div class="field"><label for="showFps">Mostrar velocidade/FPS</label><select id="showFps"><option value="1">Sim</option><option value="0">Não</option></select></div>
+        <p class="muted">Segure a tecla de acelerar (padrão: Espaço) ou use o botão ⏩ para ligar e desligar. Em “Máxima”, o emulador roda o mais rápido que o seu aparelho aguenta.</p>
+      </div>
+      <div class="pane" data-pane="touch">
+        <div class="field"><label for="touchMode">Controles virtuais</label><select id="touchMode"><option value="auto">Automático (em celular/tablet)</option><option value="on">Sempre mostrar</option><option value="off">Nunca mostrar</option></select></div>
+        <div class="field"><label for="touchSize">Tamanho dos botões</label><input type="range" id="touchSize" min="70" max="140" value="100"></div>
+        <div class="field"><label for="touchOpacity">Opacidade (modo deitado)</label><input type="range" id="touchOpacity" min="20" max="100" value="75"></div>
+        <div class="field"><label for="haptics">Vibrar ao tocar</label><select id="haptics"><option value="1">Sim</option><option value="0">Não</option></select></div>
+        <p class="muted">Com o celular em pé, os controles ficam abaixo da tela. Deitado, o jogo ocupa a tela toda e os botões ficam por cima. Deslize o dedo no direcional; o meio entre A e B aperta os dois. ☰ abre o menu.</p>
+      </div>
+      <div class="pane" data-pane="adv">
+        <h3>BIOS (opcional)</h3>
+        <p class="muted" id="biosState">Usando BIOS emulada (padrão)</p>
+        <div class="row"><button id="btnBios">Carregar gba_bios.bin</button><button id="btnBiosOff">Usar emulada</button></div>
+        <p class="muted">Não é necessária. Use só se algum jogo tiver problemas.</p>
+        <h3 style="margin-top:18px">Configurações</h3>
+        <div class="row"><button id="btnResetAll">Restaurar todas as configurações</button></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Menu rápido (botão ☰ no celular ou tecla Esc) -->
+<div id="quick"><div class="box">
+  <button data-q="pause">Pausar / Continuar</button>
+  <button data-q="ff">⏩ Acelerar</button>
+  <button data-q="save">Salvar estado</button>
+  <button data-q="load">Carregar estado</button>
+  <button data-q="full">Tela cheia</button>
+  <button data-q="up" id="qUp">Upscaling: desligado</button>
+  <button data-q="shot">📷 Captura 4K</button>
+  <button data-q="open">Abrir ROM</button>
+  <button data-q="reset">Reiniciar jogo</button>
+  <button data-q="settings">Configurações</button>
+  <button data-q="close" class="primary">Voltar ao jogo</button>
+</div></div>
+
+<input id="romInput" type="file" accept=".gba,.agb,.bin,.zip" hidden>
+<input id="saveInput" type="file" accept=".sav,.srm,.fla,.eep,.zip" hidden>
+<input id="biosInput" type="file" accept=".bin,.rom" hidden>
+<div id="toast"></div>
+<!-- Núcleo do emulador. Este mesmo código também vira o Web Worker que roda o jogo. -->
+<script id="coreScript">
+/*CORE*/
+</script>
+<!-- Renderizador (WebGL) e interface -->
+<script>
+/*UI*/
+</script>
+</body>
+</html>
