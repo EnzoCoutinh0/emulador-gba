@@ -473,6 +473,7 @@
   }
   // Abre um jogo: calcula a chave dele (código + título), busca o save guardado (o mais
   // recente entre a conta e o navegador) e manda a ROM e o save para o motor.
+  // Identifica o jogo pelo código e título do cabeçalho da ROM (ex.: "BPRE_POKEMON FIRE"); serve de chave para save, estados e biblioteca.
   function gameKeyOf(data, h) {
     let id = (h.code + '_' + h.title).replace(/[^A-Za-z0-9_-]/g, '_');
     if (!/[A-Za-z0-9]/.test(id)) id = 'rom' + crc32(data.subarray(0, 65536)).toString(16);
@@ -531,6 +532,7 @@
   }
   // Guarda o ponto exato do jogo atual (estado automático + miniatura + tempo jogado)
   let meta = null, lastAutoT = 0, playAcc = 0;
+  // Chamada ao sair do jogo: grava o estado automático com miniatura, o save da bateria e o tempo jogado.
   async function suspendGame() {
     if (!running || !gameKey) return;
     const key = gameKey;
@@ -543,6 +545,7 @@
   }
   // miniatura 240×160 da última imagem do jogo (JPEG pequeno)
   const thumbCanvas = document.createElement('canvas'); thumbCanvas.width = 240; thumbCanvas.height = 160;
+  // Converte a última imagem do jogo numa miniatura JPEG para a biblioteca e os espaços de estado.
   function thumbnail() {
     try {
       const c = thumbCanvas.getContext('2d');
@@ -627,6 +630,7 @@
   // "auto" é gravado sozinho ao sair do jogo, trocar de jogo, fechar a página e a cada 2 minutos.
   const SLOTS = ['auto', '1', '2', '3', '4'];
   let stateBusy = false;
+  // Salva o momento atual num espaço ('auto', '1'–'4'): o motor devolve o estado em bytes, e guardamos junto uma miniatura da tela.
   async function saveState(slot = '1') {
     if (!running || stateBusy) return;
     stateBusy = true;
@@ -639,6 +643,7 @@
     stateBusy = false;
     if (statesOpen()) renderStates();
   }
+  // Carrega um espaço. O espaço 1 também procura estados da versão anterior (antes de existirem espaços).
   async function loadState(slot = '1') {
     if (!running || stateBusy) return;
     stateBusy = true;
@@ -658,6 +663,7 @@
   function statesOpen() { return statesEl.classList.contains('open'); }
   function openStates() { if (!running) return; closeQuick(); statesEl.classList.add('open'); renderStates(); }
   function closeStates() { statesEl.classList.remove('open'); }
+  // Monta a lista de espaços com miniatura, data e os botões Salvar aqui / Carregar.
   async function renderStates() {
     const list = $('#slotList'); list.innerHTML = '';
     for (const slot of SLOTS) {
@@ -696,6 +702,7 @@
   }
 
   // ---------- caixa de diálogo (confirmar / perguntar) ----------
+  // Janela de confirmação própria: o site do Claude bloqueia alert/confirm/prompt do navegador. Devolve os valores digitados, ou null se cancelar.
   function dialog({ title, text, fields = [], ok = 'OK', danger = false, cancel = 'Cancelar' }) {
     return new Promise((res) => {
       const bg = $('#dialog'); $('#dlgTitle').textContent = title; $('#dlgText').textContent = text || '';
@@ -714,6 +721,7 @@
 
   // ---------- telas: login, biblioteca e jogo ----------
   let view = 'login';
+  // Troca entre as 3 telas (login, biblioteca, jogo) mudando a classe do <body>; o CSS mostra só a tela certa. Fora do jogo, a emulação pausa.
   function showView(v) {
     view = v;
     document.body.classList.toggle('v-login', v === 'login');
@@ -724,10 +732,13 @@
     if (v === 'login') renderLogin();
     fitScreen();
   }
+  // Volta para a biblioteca guardando antes o ponto exato do jogo atual.
   async function goLibrary() {
     if (running) { await suspendGame(); running = false; document.body.classList.remove('playing'); }
     showView('lib');
   }
+  // Biblioteca: lista as ROMs guardadas desta conta (chaves "<conta>/<jogo>" no IndexedDB),
+  // com a miniatura do último ponto, quando foi jogado e o tempo total. Os mais recentes primeiro.
   async function renderLibrary() {
     $('#libHello').textContent = Store.user.guest ? 'Jogando como convidado' : `Olá, ${Store.user.name}`;
     const grid = $('#libGrid'); grid.innerHTML = '';
@@ -777,6 +788,7 @@
   $('#btnLibrary').addEventListener('click', goLibrary);
 
   // ---------- login ----------
+  // Tela de login: mostra as contas que já existem neste navegador para entrar com um clique.
   async function renderLogin() {
     const list = $('#acctList'); list.innerHTML = '';
     let accts = []; try { accts = await Accounts.list(); } catch (e) { }
@@ -799,6 +811,8 @@
     $('#loginErr').textContent = '';
   }
   $$('.ltab').forEach(b => b.addEventListener('click', () => setLoginTab(b.dataset.lt)));
+  // Entra numa conta: define o prefixo de armazenamento, carrega as configurações dela e abre a biblioteca.
+  // "Continuar conectado" guarda só o id da conta (nunca a senha) para entrar direto na próxima vez.
   async function enterAs(user, remember) {
     // a primeira conta que entrar depois da atualização herda os saves antigos
     if (!lsGet('gba.legacyOwner')) { lsSet('gba.legacyOwner', user.id); }
@@ -834,6 +848,7 @@
   $('#acctBtn').addEventListener('click', (e) => { e.stopPropagation(); $('#acctMenu').classList.toggle('open'); });
   document.addEventListener('click', () => $('#acctMenu').classList.remove('open'));
   $('#amLib').addEventListener('click', goLibrary);
+  // Sair: guarda o ponto do jogo atual e volta para a tela de login.
   async function logout() {
     if (running) { await suspendGame(); running = false; document.body.classList.remove('playing'); }
     try { localStorage.removeItem('gba.session'); } catch (e) { }
